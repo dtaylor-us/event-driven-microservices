@@ -20,22 +20,29 @@ Topic: versioned `grid.events.v1` with an event envelope (eventId, eventType, oc
 - **Docker** (for Kafka, Postgres, observability stack — Phase 3)
 - **Gradle** (or use the project’s Gradle Wrapper)
 
-## Project structure (Phase 1)
+## Project structure
 
 ```
 event-driven-microservices/
-├── build.gradle.kts
+├── build.gradle
 ├── settings.gradle.kts
 ├── gradle/
 │   └── wrapper/
-│       └── gradle-wrapper.properties
 ├── events-schema/           # shared event contract (library)
+│   └── EventEnvelope, EventTypes
 ├── event-ingest-service/    # REST + Kafka producer (port 8080)
 ├── pricing-consumer-service/# Kafka consumer + Postgres (port 8081)
 ├── alerting-service/       # Kafka consumer + alerts API (port 8082)
 ├── audit-service/          # Kafka consumer + audit log (port 8083)
 └── README.md
 ```
+
+### Event contract (Phase 2)
+
+All services depend on **events-schema**, which defines:
+
+- **`EventEnvelope`**: `eventId` (UUID), `eventType`, `occurredAt`, `producedAt`, `source`, `correlationId`, `payload` (JSON), `version`. Used for every message on `grid.events.v1`.
+- **`EventTypes`**: constants `PRICING`, `ALERT`, `AUDIT`, `GENERIC` for routing and filtering.
 
 ## How to run (Phase 1)
 
@@ -88,6 +95,18 @@ Then:
 | 4 | `./gradlew check` | All unit/context-load tests pass. |
 
 **Definition of done for Phase 1:** All modules build; each service has a runnable Boot app; at least one test per module (context load or placeholder); README and this runbook section in place.
+
+---
+
+## Runbook — Phase 2: Event contract
+
+| Step | Command / action | Expected outcome |
+|------|------------------|------------------|
+| 1 | `./gradlew :events-schema:build` | events-schema compiles and tests pass (EventEnvelope + EventTypes, JSON round-trip). |
+| 2 | `./gradlew clean build` | All modules build; services compile against events-schema. |
+| 3 | `./gradlew :events-schema:test` | EventEnvelopeTest and EventsSchemaModuleTest pass. |
+
+**Definition of done for Phase 2:** EventEnvelope and EventTypes are in events-schema; JSON serialization/deserialization tested; all services depend on events-schema; README and runbook updated.
 
 ---
 

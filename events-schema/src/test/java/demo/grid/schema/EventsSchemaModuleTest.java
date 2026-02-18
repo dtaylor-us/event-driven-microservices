@@ -2,15 +2,16 @@ package demo.grid.schema;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Placeholder test for events-schema module until Phase 2 adds event contracts.
+ * Smoke test that the schema module and its public API are usable.
  */
 class EventsSchemaModuleTest {
 
     @Test
-    void moduleBuilds() {
-        assertTrue(true);
+    void eventEnvelopeAndEventTypes_areAvailable() {
+        assertNotNull(EventTypes.PRICING);
+        assertNotNull(EventEnvelope.class);
     }
 }
