@@ -1,6 +1,6 @@
-# Phase 3 + 4: Infrastructure and event-ingest-service
+# Phase 3–5: Infrastructure, event-ingest-service, pricing-consumer-service
 # Run: docker compose up -d
-# Build and start ingest: docker compose up -d --build event-ingest-service
+# Build and start apps: docker compose up -d --build event-ingest-service pricing-consumer-service
 # All services use the Compose default network (event-driven-microservices_default).
 name: event-driven-microservices
 
@@ -13,11 +13,27 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Use internal listener so metadata returns kafka:29092 (not localhost:9092)
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       API_KEY: ${API_KEY:-dev-key}
     depends_on:
       - kafka
+
+  pricing-consumer-service:
+    build:
+      context: .
+      dockerfile: pricing-consumer-service/Dockerfile
+    container_name: grid-pricing-consumer
+    ports:
+      - "8081:8081"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: grid.events.v1
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-grid}
+      POSTGRES_USER: ${POSTGRES_USER:-grid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+    depends_on:
+      - kafka
+      - postgres
 
   kafka:
     image: confluentinc/cp-kafka:8.1.1

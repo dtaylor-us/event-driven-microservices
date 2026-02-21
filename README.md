@@ -50,9 +50,9 @@ All services depend on **events-schema**, which defines:
 
 ## How to run
 
-### Start infrastructure (Phase 3) and event-ingest-service (Phase 4)
+### Start infrastructure (Phase 3), event-ingest-service (Phase 4), and pricing-consumer-service (Phase 5)
 
-From the project root, start infra and the ingest service (builds the app image on first run):
+From the project root, start infra and both app services (builds images on first run):
 
 ```bash
 docker compose up -d --build
@@ -80,9 +80,33 @@ Optional: copy `.env.example` to `.env` to override Postgres password, host port
 | Prometheus        | 9090           | Metrics (scrapes OTel, Kafka exporter) |
 | Grafana           | 3000           | Dashboards (admin / admin); Prometheus + Kafka overview auto-provisioned |
 | kafka-exporter    | 9308           | Kafka metrics for Prometheus (broker, topics, consumer lag) |
-| event-ingest-service | 8080        | REST API for event ingest (when run via compose) |
+| event-ingest-service   | 8080        | REST API for event ingest (when run via compose) |
+| pricing-consumer-service | 8081      | Consumes events from Kafka → Postgres; GET /api/pricing-events (Phase 5) |
 
 Stop: `docker compose down`. Data in Postgres/Prometheus/Grafana is in Docker volumes.
+
+### Verify end-to-end (ingest → Kafka → pricing-consumer → Postgres)
+
+Run these in order (project root; stack up: `docker compose up -d --build`).
+
+1. **Containers up:** `docker compose ps` — all services show **Up**.
+2. **Ingest accepts event:**  
+   `curl -X POST http://localhost:8080/api/events -H "X-API-Key: dev-key" -H "Content-Type: application/json" -d '{"eventType":"PRICING","payload":{"price":99}}'`  
+   Expect **HTTP 202** and JSON with `eventId`, `eventType`, `status: accepted`.
+3. **Consumer stored it:** Wait 3–5 seconds, then  
+   `curl -s http://localhost:8081/api/pricing-events`  
+   Expect JSON with `content` array containing the event (`eventType` PRICING, same payload).
+4. **Optional – get by ID:** Copy an `eventId` from step 3 and  
+   `curl -s http://localhost:8081/api/pricing-events/<eventId>`  
+   Expect single-event JSON.
+5. **Optional – Postgres:**  
+   `docker compose exec postgres psql -U grid -d grid -c 'SELECT event_id, event_type FROM pricing_event LIMIT 5;'`  
+   Expect rows in `pricing_event`.
+
+**One-liner:**  
+`curl -X POST http://localhost:8080/api/events -H "X-API-Key: dev-key" -H "Content-Type: application/json" -d '{"eventType":"PRICING","payload":{"price":99}}' ; sleep 4 ; curl -s http://localhost:8081/api/pricing-events | head -20`
+
+If ingest returns 401, use `X-API-Key: dev-key` (or your `.env` value). If pricing-events is empty, wait longer or run `docker compose logs pricing-consumer-service`.
 
 **Kafka dashboard shows “No data” on every panel?**
 
@@ -116,6 +140,9 @@ That usually means **Prometheus is not scraping the Kafka exporter** (or Grafana
    Then check **Targets** again; **kafka-exporter** should be **UP**.
 
 5. In Grafana, set time range to **Last 5 minutes** and refresh the Kafka overview dashboard.
+
+**First panel shows UP but "Topics discovered" (or other panels) show No data?**  
+Exporter is scraped but may not see Kafka or no topics exist yet. 1) Same network: `docker network inspect event-driven-microservices_default` should list `grid-kafka-exporter` and `grid-kafka`. 2) Restart exporter after Kafka is up: `docker compose restart kafka-exporter`. 3) Send one event so topic `grid.events.v1` exists (sample curl in README). 4) Confirm topic metrics: `curl -s http://localhost:9308/metrics | grep kafka_topic_partitions`.
 
 **Kafka dashboard shows UP but “no messages” for your topic?**
 
@@ -223,6 +250,40 @@ curl -X POST http://localhost:8080/api/events \
 ```
 
 Override API key or Kafka via env: `API_KEY=my-secret ./gradlew :event-ingest-service:bootRun` or `KAFKA_BOOTSTRAP_SERVERS=localhost:9092`.
+
+---
+
+## Phase 5: pricing-consumer-service (Kafka consumer + Postgres)
+
+**What was implemented**
+
+- **Kafka consumer** that subscribes to `grid.events.v1` (same topic the ingest service publishes to) in consumer group `pricing-consumer-group`. It deserializes messages as `EventEnvelope` (JSON) and **filters by event type**: only **PRICING** and **GENERIC** events are persisted; ALERT and AUDIT are skipped (handled by other services).
+- **Persistence** in Postgres via Spring Data JPA. Each consumed event is stored in table **`pricing_event`** with: `event_id` (UUID, primary key), `event_type`, `occurred_at`, `produced_at`, `source`, `correlation_id`, `payload` (JSON text), `consumed_at`. **Idempotency** is enforced by using `event_id` as the primary key: if the same event is redelivered (e.g. after a consumer restart or retry), the insert would violate the unique constraint and the consumer catches `DataIntegrityViolationException` and skips the duplicate (message is still acknowledged so it is not redelivered indefinitely).
+- **REST API** (read-only) on port **8081**:
+  - **GET /api/pricing-events** — paginated list of stored events (newest first). Query params: `page` (default 0), `size` (default 20, max 100).
+  - **GET /api/pricing-events/{eventId}** — fetch a single event by ID (404 if not found).
+- **Configuration**: `application.yml` wires Kafka consumer (bootstrap servers, group-id, JsonDeserializer for `EventEnvelope` with trusted package `demo.grid.schema`), Postgres datasource (URL, user, password from env), and JPA (ddl-auto: update, PostgreSQL dialect). Topic name is configurable via `app.kafka.topic` (default `grid.events.v1`).
+- **Docker**: `pricing-consumer-service/Dockerfile` (multi-stage build from repo root); **docker-compose** runs the service with `KAFKA_BOOTSTRAP_SERVERS=kafka:29092`, `SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/grid`, and Postgres credentials from `.env`. The service **depends_on** kafka and postgres so it starts after they are up.
+
+**How it fits in the overall system**
+
+1. **event-ingest-service** receives REST calls and publishes `EventEnvelope` messages to Kafka topic **grid.events.v1**.
+2. **pricing-consumer-service** is one of several **consumers** of that same topic. It runs in its own consumer group (`pricing-consumer-group`), so it gets a copy of every message; it only persists PRICING and GENERIC events. Other consumers (alerting-service, audit-service, in later phases) will consume the same stream for their own use cases.
+3. Events are **durable** in Postgres: you can query them via the REST API or directly in the database. The primary key on `event_id` ensures at-most-once persistence per event even if Kafka redelivers.
+4. **End-to-end flow**:  
+   `POST /api/events` (ingest) → Kafka `grid.events.v1` → pricing-consumer reads message → persists to `pricing_event` → **GET /api/pricing-events** returns the stored events.
+
+**Runbook — Phase 5**
+
+| Step | Command / action | Expected outcome |
+|------|------------------|------------------|
+| 1 | Start infra + apps: `docker compose up -d --build` | event-ingest-service and pricing-consumer-service (and Kafka, Postgres, etc.) running. |
+| 2 | Send a PRICING event: `curl -X POST http://localhost:8080/api/events -H "X-API-Key: dev-key" -H "Content-Type: application/json" -d '{"eventType":"PRICING","payload":{"price":99}}'` | HTTP 202 from ingest. |
+| 3 | After a few seconds: `curl -s http://localhost:8081/api/pricing-events` | JSON with `content` array containing the persisted event (eventId, eventType PRICING, payload, consumedAt, etc.). |
+| 4 | `GET /api/pricing-events?page=0&size=5` | Paginated list; `totalElements` and `totalPages` in response. |
+| 5 | `./gradlew :pricing-consumer-service:test` | Unit tests (PricingEventConsumerTest, PricingEventControllerTest) and context-load test pass. |
+
+**Definition of done for Phase 5:** pricing-consumer-service consumes from `grid.events.v1`, persists PRICING and GENERIC events to Postgres with idempotency by eventId, exposes GET /api/pricing-events and GET /api/pricing-events/{id}; runs in Docker with Kafka and Postgres; tests and README/runbook updated.
 
 ---
 

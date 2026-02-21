@@ -1,2 +1,31 @@
 server:
   port: 8081
+
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: pricing-consumer-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "demo.grid.schema,*"
+        spring.json.value.default.type: demo.grid.schema.EventEnvelope
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:54320/grid}
+    username: ${POSTGRES_USER:grid}
+    password: ${POSTGRES_PASSWORD:grid-secret}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate.format_sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+# Topic to consume (must match event-ingest-service and other producers)
+app:
+  kafka:
+    topic: ${KAFKA_TOPIC:grid.events.v1}

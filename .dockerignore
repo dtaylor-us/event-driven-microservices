@@ -20,8 +20,7 @@ README.md
 .env.*
 !.env.example
 
-# Other services (only ingest + schema needed for event-ingest-service image)
-pricing-consumer-service
+# Other services not needed for event-ingest-service / pricing-consumer-service images
 alerting-service
 audit-service
 
