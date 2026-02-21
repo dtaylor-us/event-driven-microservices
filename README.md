@@ -82,6 +82,7 @@ Optional: copy `.env.example` to `.env` to override Postgres password, host port
 | kafka-exporter    | 9308           | Kafka metrics for Prometheus (broker, topics, consumer lag) |
 | event-ingest-service   | 8080        | REST API for event ingest (when run via compose) |
 | pricing-consumer-service | 8081      | Consumes events from Kafka → Postgres; GET /api/pricing-events (Phase 5) |
+| alerting-service         | 8082      | Consumes events → alerts in Postgres; GET /api/alerts (Phase 6) |
 
 Stop: `docker compose down`. Data in Postgres/Prometheus/Grafana is in Docker volumes.
 
@@ -284,6 +285,34 @@ Override API key or Kafka via env: `API_KEY=my-secret ./gradlew :event-ingest-se
 | 5 | `./gradlew :pricing-consumer-service:test` | Unit tests (PricingEventConsumerTest, PricingEventControllerTest) and context-load test pass. |
 
 **Definition of done for Phase 5:** pricing-consumer-service consumes from `grid.events.v1`, persists PRICING and GENERIC events to Postgres with idempotency by eventId, exposes GET /api/pricing-events and GET /api/pricing-events/{id}; runs in Docker with Kafka and Postgres; tests and README/runbook updated.
+
+---
+
+## Phase 6: alerting-service (Kafka consumer + Postgres alerts API)
+
+**What was implemented**
+
+- **Kafka consumer** subscribing to `grid.events.v1` in consumer group **alerting-consumer-group**. Filters by event type: only **ALERT** and **GENERIC** events are persisted as alerts; PRICING and AUDIT are skipped.
+- **Persistence** in Postgres: table **`alert`** with `event_id` (UUID, PK), `event_type`, `severity` (ALERT→HIGH, GENERIC→NORMAL), `summary` (payload JSON or fallback), `source`, `correlation_id`, `created_at`. **Idempotency** by `event_id` (duplicate deliveries skipped).
+- **REST API** (port **8082**): **GET /api/alerts** (paginated, newest first; `page`, `size`), **GET /api/alerts/{eventId}** (single alert or 404).
+- **Configuration**: Same pattern as pricing-consumer (Kafka consumer, Postgres, JPA, `app.kafka.topic`). Same Postgres DB (`grid`) and credentials.
+- **Docker**: `alerting-service/Dockerfile`; **docker-compose** service **alerting-service** with Kafka and Postgres env, depends_on kafka and postgres.
+
+**How it fits in the system**
+
+- Ingest publishes to `grid.events.v1`; **alerting-service** consumes a copy (its own group), persists ALERT and GENERIC as alerts. **pricing-consumer-service** and **alerting-service** both consume the same topic independently.
+- Flow: `POST /api/events` with `eventType: "ALERT"` → Kafka → alerting-consumer → row in `alert` → **GET /api/alerts** returns it (severity HIGH). Same for GENERIC (severity NORMAL).
+
+**Runbook — Phase 6**
+
+| Step | Command / action | Expected outcome |
+|------|------------------|------------------|
+| 1 | `docker compose up -d --build` | alerting-service (and others) running. |
+| 2 | Send an ALERT event: `curl -X POST http://localhost:8080/api/events -H "X-API-Key: dev-key" -H "Content-Type: application/json" -d '{"eventType":"ALERT","payload":{"message":"High load"}}'` | HTTP 202. |
+| 3 | After a few seconds: `curl -s http://localhost:8082/api/alerts` | JSON with `content` array; one alert, `eventType` ALERT, `severity` HIGH, `summary` contains payload. |
+| 4 | `./gradlew :alerting-service:test` | AlertEventConsumerTest, AlertControllerTest, context-load pass. |
+
+**Definition of done for Phase 6:** alerting-service consumes from `grid.events.v1`, persists ALERT and GENERIC events to Postgres as alerts (idempotent by eventId), exposes GET /api/alerts and GET /api/alerts/{eventId}; runs in Docker; tests and README updated.
 
 ---
 
