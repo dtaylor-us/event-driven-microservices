@@ -1,0 +1,28 @@
+# Prometheus config for local dev. Scrapes OTel Collector and self.
+# In Phase 8 we can add scrape configs for each Spring Boot app (actuator/prometheus).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8888"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  - job_name: kafka-exporter
+    static_configs:
+      # Use container name so DNS resolves when both are on the same Docker network (grid)
+      - targets: ["grid-kafka-exporter:9308"]
+    metrics_path: /metrics
+    scrape_interval: 10s
+
+  # Spring Boot apps (Phase 8): add when actuator Prometheus is enabled
+  # - job_name: event-ingest-service
+  #   static_configs:
+  #     - targets: ["host.docker.internal:8080"]

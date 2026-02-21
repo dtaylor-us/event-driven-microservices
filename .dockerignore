@@ -1,0 +1,30 @@
+# Git and IDE
+.git
+.idea
+*.iml
+.vscode
+
+# Build outputs (rebuilt inside container)
+.gradle
+build
+*/build
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Docs and local env
+README.md
+.env
+.env.*
+!.env.example
+
+# Other services (only ingest + schema needed for event-ingest-service image)
+pricing-consumer-service
+alerting-service
+audit-service
+
+# Scripts and config not needed for build
+start-infra.sh
+docker

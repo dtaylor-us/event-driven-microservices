@@ -1,0 +1,9 @@
+# Test profile: no real Kafka needed when KafkaTemplate is mocked
+app:
+  api-key: test-key
+  kafka:
+    topic: grid.events.v1
+
+spring:
+  kafka:
+    bootstrap-servers: 127.0.0.1:9999

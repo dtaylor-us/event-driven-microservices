@@ -1,0 +1,115 @@
+# Phase 3 + 4: Infrastructure and event-ingest-service
+# Run: docker compose up -d
+# Build and start ingest: docker compose up -d --build event-ingest-service
+# All services use the Compose default network (event-driven-microservices_default).
+name: event-driven-microservices
+
+services:
+  event-ingest-service:
+    build:
+      context: .
+      dockerfile: event-ingest-service/Dockerfile
+    container_name: grid-event-ingest
+    ports:
+      - "8080:8080"
+    environment:
+      # Use internal listener so metadata returns kafka:29092 (not localhost:9092)
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      API_KEY: ${API_KEY:-dev-key}
+    depends_on:
+      - kafka
+
+  kafka:
+    image: confluentinc/cp-kafka:8.1.1
+    hostname: kafka
+    container_name: grid-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft (no Zookeeper); Confluent image uses CLUSTER_ID for format
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    # No healthcheck: Kafka can take 60s+ to format storage and start. Use ./start-infra.sh to wait for readiness.
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: grid-postgres
+    ports:
+      - "${POSTGRES_PORT:-54320}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-grid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-grid}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-grid} -d ${POSTGRES_DB:-grid}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    container_name: grid-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics from collector
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: grid-kafka-exporter
+    command:
+      - --kafka.server=kafka:29092
+      - --web.listen-address=:9308
+      - --topic.filter=.*
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: grid-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    depends_on:
+      - otel-collector
+      - kafka-exporter
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grid-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./docker/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:
