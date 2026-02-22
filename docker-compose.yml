@@ -14,6 +14,7 @@ services:
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       API_KEY: ${API_KEY:-dev-key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       - kafka
 
@@ -30,6 +31,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-grid}
       POSTGRES_USER: ${POSTGRES_USER:-grid}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       - kafka
       - postgres
@@ -47,6 +49,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-grid}
       POSTGRES_USER: ${POSTGRES_USER:-grid}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       - kafka
       - postgres
@@ -64,6 +67,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-grid}
       POSTGRES_USER: ${POSTGRES_USER:-grid}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       - kafka
       - postgres

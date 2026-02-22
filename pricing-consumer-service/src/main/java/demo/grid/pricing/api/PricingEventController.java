@@ -2,6 +2,9 @@ package demo.grid.pricing.api;
 
 import demo.grid.pricing.domain.PricingEventEntity;
 import demo.grid.pricing.repository.PricingEventRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -15,9 +18,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * Read-only API to query persisted pricing events (for demo and debugging).
- */
+@Tag(name = "Pricing events", description = "Read persisted pricing events consumed from the grid")
 @RestController
 @RequestMapping("/api")
 public class PricingEventController {
@@ -28,10 +29,11 @@ public class PricingEventController {
         this.repository = repository;
     }
 
+    @Operation(summary = "List pricing events", description = "Paginated list, newest first")
     @GetMapping("/pricing-events")
     public ResponseEntity<PricingEventPage> listEvents(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @Parameter(description = "Page index (0-based)") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max 100)") @RequestParam(defaultValue = "20") int size) {
         if (size > 100) size = 100;
         Page<PricingEventEntity> p = repository.findAllByOrderByConsumedAtDesc(PageRequest.of(page, size));
         List<PricingEventResponse> content = p.getContent().stream()
@@ -46,8 +48,10 @@ public class PricingEventController {
         ));
     }
 
+    @Operation(summary = "Get pricing event by ID")
     @GetMapping("/pricing-events/{eventId}")
-    public ResponseEntity<PricingEventResponse> getEvent(@PathVariable UUID eventId) {
+    public ResponseEntity<PricingEventResponse> getEvent(
+            @Parameter(description = "Event UUID") @PathVariable UUID eventId) {
         return repository.findById(eventId)
                 .map(PricingEventResponse::from)
                 .map(ResponseEntity::ok)

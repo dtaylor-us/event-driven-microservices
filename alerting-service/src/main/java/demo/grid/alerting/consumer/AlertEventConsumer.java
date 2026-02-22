@@ -11,10 +11,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.annotation.RetryableTopic;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 
@@ -42,35 +45,48 @@ public class AlertEventConsumer {
         this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = "#{__listener.topic}", groupId = "${spring.kafka.consumer.group-id}")
+    private static final String MDC_CORRELATION_ID = "correlationId";
+
+    @RetryableTopic(
+            attempts = "3",
+            backoff = @Backoff(delay = 1000, multiplier = 2.0),
+            exclude = {DataIntegrityViolationException.class}
+    )
+    @KafkaListener(topics = "${app.kafka.topic}", groupId = "${spring.kafka.consumer.group-id}")
     public void onEvent(@Payload EventEnvelope envelope,
                         @Header(value = KafkaHeaders.RECEIVED_KEY, required = false) String key) {
-        String eventType = envelope.eventType();
-        if (!EventTypes.ALERT.equals(eventType) && !EventTypes.GENERIC.equals(eventType)) {
-            log.debug("Skipping non-alert event type: {}", eventType);
-            return;
-        }
-
-        String severity = EventTypes.ALERT.equals(eventType) ? SEVERITY_HIGH : SEVERITY_NORMAL;
-        String summary = buildSummary(envelope);
-        Instant createdAt = Instant.now();
-
-        AlertEntity entity = new AlertEntity(
-                envelope.eventId(),
-                envelope.eventType(),
-                severity,
-                summary,
-                envelope.source(),
-                envelope.correlationId(),
-                createdAt
-        );
-
+        String correlationId = envelope.correlationId() != null ? envelope.correlationId() : envelope.eventId().toString();
+        MDC.put(MDC_CORRELATION_ID, correlationId);
         try {
-            repository.save(entity);
-            log.info("Persisted alert eventId={} type={} severity={} correlationId={}",
-                    envelope.eventId(), eventType, severity, envelope.correlationId());
-        } catch (DataIntegrityViolationException e) {
-            log.debug("Duplicate alert ignored (idempotent) eventId={}", envelope.eventId());
+            String eventType = envelope.eventType();
+            if (!EventTypes.ALERT.equals(eventType) && !EventTypes.GENERIC.equals(eventType)) {
+                log.debug("Skipping non-alert event type: {}", eventType);
+                return;
+            }
+
+            String severity = EventTypes.ALERT.equals(eventType) ? SEVERITY_HIGH : SEVERITY_NORMAL;
+            String summary = buildSummary(envelope);
+            Instant createdAt = Instant.now();
+
+            AlertEntity entity = new AlertEntity(
+                    envelope.eventId(),
+                    envelope.eventType(),
+                    severity,
+                    summary,
+                    envelope.source(),
+                    envelope.correlationId(),
+                    createdAt
+            );
+
+            try {
+                repository.save(entity);
+                log.info("Persisted alert eventId={} type={} severity={} correlationId={}",
+                        envelope.eventId(), eventType, severity, envelope.correlationId());
+            } catch (DataIntegrityViolationException e) {
+                log.debug("Duplicate alert ignored (idempotent) eventId={}", envelope.eventId());
+            }
+        } finally {
+            MDC.remove(MDC_CORRELATION_ID);
         }
     }
 

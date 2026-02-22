@@ -2,6 +2,8 @@ server:
   port: 8083
 
 spring:
+  application:
+    name: audit-service
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -9,6 +11,7 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       auto-offset-reset: earliest
+      observation-enabled: true
       properties:
         spring.json.trusted.packages: "demo.grid.schema,*"
         spring.json.value.default.type: demo.grid.schema.EventEnvelope
@@ -25,6 +28,31 @@ spring:
       hibernate.format_sql: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
 
+# OpenAPI / Swagger UI (see /swagger-ui.html and /v3/api-docs)
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+  show-actuator: false
+
 app:
   kafka:
     topic: ${KAFKA_TOPIC:grid.events.v1}
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics
+
+logging:
+  pattern:
+    correlation: "[%X{correlationId:-},%X{traceId:-},%X{spanId:-}] "
