@@ -1,6 +1,6 @@
-# Phase 3–6: Infrastructure, event-ingest-service, pricing-consumer-service, alerting-service
+# Phase 3–7: Infrastructure + event-ingest, pricing-consumer, alerting, audit
 # Run: docker compose up -d
-# Build and start apps: docker compose up -d --build event-ingest-service pricing-consumer-service alerting-service
+# Build and start apps: docker compose up -d --build event-ingest-service pricing-consumer-service alerting-service audit-service
 name: event-driven-microservices
 
 services:
@@ -41,6 +41,23 @@ services:
     container_name: grid-alerting
     ports:
       - "8082:8082"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: grid.events.v1
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-grid}
+      POSTGRES_USER: ${POSTGRES_USER:-grid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grid-secret}
+    depends_on:
+      - kafka
+      - postgres
+
+  audit-service:
+    build:
+      context: .
+      dockerfile: audit-service/Dockerfile
+    container_name: grid-audit
+    ports:
+      - "8083:8083"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TOPIC: grid.events.v1

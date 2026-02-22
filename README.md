@@ -83,6 +83,7 @@ Optional: copy `.env.example` to `.env` to override Postgres password, host port
 | event-ingest-service   | 8080        | REST API for event ingest (when run via compose) |
 | pricing-consumer-service | 8081      | Consumes events from Kafka → Postgres; GET /api/pricing-events (Phase 5) |
 | alerting-service         | 8082      | Consumes events → alerts in Postgres; GET /api/alerts (Phase 6) |
+| audit-service            | 8083      | Consumes all events → immutable audit log; GET /api/audit-events (Phase 7) |
 
 Stop: `docker compose down`. Data in Postgres/Prometheus/Grafana is in Docker volumes.
 
@@ -313,6 +314,33 @@ Override API key or Kafka via env: `API_KEY=my-secret ./gradlew :event-ingest-se
 | 4 | `./gradlew :alerting-service:test` | AlertEventConsumerTest, AlertControllerTest, context-load pass. |
 
 **Definition of done for Phase 6:** alerting-service consumes from `grid.events.v1`, persists ALERT and GENERIC events to Postgres as alerts (idempotent by eventId), exposes GET /api/alerts and GET /api/alerts/{eventId}; runs in Docker; tests and README updated.
+
+---
+
+## Phase 7: audit-service (immutable audit log)
+
+**What was implemented**
+
+- **Kafka consumer** subscribing to `grid.events.v1` in consumer group **audit-consumer-group**. Persists **every** event type (PRICING, ALERT, AUDIT, GENERIC) with no filtering — full immutable audit trail.
+- **Persistence** in Postgres: table **`audit_event`** with `event_id` (UUID, PK), `event_type`, `occurred_at`, `produced_at`, `source`, `correlation_id`, `payload` (TEXT), `version`, `audited_at`. Idempotent by `event_id`.
+- **REST API** (port **8083**): **GET /api/audit-events** (paginated, newest first), **GET /api/audit-events/{eventId}** (single record or 404).
+- **Configuration / Docker**: Same pattern as other consumers (Kafka, Postgres, JPA); Dockerfile and docker-compose service **audit-service** on port 8083.
+
+**How it fits in the system**
+
+- Single topic `grid.events.v1` is consumed by pricing-consumer (PRICING/GENERIC), alerting (ALERT/GENERIC), and **audit** (all types). Audit is the only consumer that records every event for compliance/debugging.
+- Flow: any `POST /api/events` → Kafka → audit-consumer → row in `audit_event` → **GET /api/audit-events** returns the full log.
+
+**Runbook — Phase 7**
+
+| Step | Command / action | Expected outcome |
+|------|------------------|------------------|
+| 1 | `docker compose up -d --build` | audit-service (and others) running. |
+| 2 | Send any event, e.g. PRICING: `curl -X POST http://localhost:8080/api/events -H "X-API-Key: dev-key" -H "Content-Type: application/json" -d '{"eventType":"PRICING","payload":{}}'` | HTTP 202. |
+| 3 | After a few seconds: `curl -s http://localhost:8083/api/audit-events` | JSON with `content` array; event appears with `eventType`, `payload`, `auditedAt`. |
+| 4 | `./gradlew :audit-service:test` | AuditEventConsumerTest, AuditEventControllerTest, context-load pass. |
+
+**Definition of done for Phase 7:** audit-service consumes all events from `grid.events.v1`, persists to Postgres as immutable audit log (idempotent by eventId), exposes GET /api/audit-events and GET /api/audit-events/{eventId}; runs in Docker; tests and README updated.
 
 ---
 

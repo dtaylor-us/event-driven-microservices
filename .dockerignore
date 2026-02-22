@@ -20,8 +20,7 @@ README.md
 .env.*
 !.env.example
 
-# Other services not needed for event-ingest-service / pricing-consumer-service / alerting-service images
-audit-service
+# Other services not needed when building individual service images (each Dockerfile copies only its module + events-schema)
 
 # Scripts and config not needed for build
 start-infra.sh
